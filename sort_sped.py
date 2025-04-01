@@ -1,107 +1,113 @@
-import pandas as pd
 import streamlit as st
+import pandas as pd
 import io
 
-st.set_page_config(page_title="Reestruturador Bloco C - EFD 2020", layout="centered")
-st.title("📄 Reestruturador do Bloco C (EFD Contribuições - Leiaute 2020)")
-st.markdown("Reestrutura os registros C170, C180, C185 conforme o tipo de nota fiscal (entrada ou saída).")
+st.set_page_config(
+    page_title="Reestruturador Bloco C - EFD",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
 
-uploaded_file = st.file_uploader("📤 Envie seu arquivo BLOCO C (.csv ou .txt)", type=["csv", "txt"])
-formato_saida = st.radio("📦 Formato de saída desejado:", ["CSV", "TXT"])
+# Estilo Dark
+st.markdown("""
+    <style>
+    body { background-color: #111111; color: white; }
+    .stApp { background-color: #1e1e1e; }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("🛠️ Reestruturador do Bloco C - EFD Contribuições")
+st.markdown("Ajusta a estrutura do Bloco C conforme o leiaute oficial validado no PVA.")
+
+uploaded_file = st.file_uploader("📤 Envie o arquivo .txt da EFD:", type=["txt"])
 
 if uploaded_file:
-    progress = st.progress(0, text="🔄 Carregando dados...")
+    progress = st.progress(0, text="🔄 Carregando arquivo...")
 
-    if uploaded_file.name.endswith(".txt"):
-        df_raw = pd.read_csv(uploaded_file, header=None, dtype=str, sep="\n", engine="python")
-        df_raw.columns = ['Conteudo']
-        df_raw['Registro'] = df_raw['Conteudo'].str.extract(r'\|(C\d{3})\|')
-        df_raw['Nota'] = df_raw['Conteudo'].str.extract(r'\|C100\|(\d+)')
-        df_raw['Nota'] = df_raw['Nota'].fillna(method='ffill')
-        df = df_raw[['Nota', 'Registro', 'Conteudo']].copy()
-    else:
-        df = pd.read_csv(uploaded_file, header=None, dtype=str, low_memory=False)
-        df = df[[0, 14, 13]]
-        df.columns = ['Nota', 'Registro', 'Conteudo']
+    content = uploaded_file.read().decode("ISO-8859-1")
+    linhas = content.splitlines(keepends=True)
 
-    df['Nota'] = pd.to_numeric(df['Nota'], errors='coerce')
-    df = df.dropna(subset=['Nota']).reset_index(drop=True)
+    df_txt = pd.DataFrame(linhas, columns=["Conteudo"])
+    df_txt['Registro'] = df_txt['Conteudo'].str.extract(r'\|(C\d{3})\|')
 
-    progress.progress(0.1, text="🔍 Identificando tipo de operação por nota...")
-
-    df_c100 = df[df['Registro'] == 'C100'].copy()
-    df_c100['Tipo_Operacao'] = df_c100['Conteudo'].str.split('|').str[2]
-    mapa_operacao = df_c100.set_index('Nota')['Tipo_Operacao'].to_dict()
-
-    progress.progress(0.2, text="🔧 Reestruturando registros...")
+    # Mapeia o tipo da operação para cada C100
+    tipo_op_map = {}
+    for i, row in df_txt.iterrows():
+        if row['Registro'] == 'C100':
+            campos = row['Conteudo'].split('|')
+            if len(campos) > 2:
+                tipo_op_map[i] = campos[2]
 
     saida_final = []
-    nota_atual = None
-    buffer = {
-        'C100': [],
-        'C170': [],
-        'C180': [],
-        'C185': [],
-        'C190': [],
-        'C195': [],
-        'C197': []
-    }
+    buffer = {k: [] for k in ['C100', 'C170', 'C180', 'C185', 'C190', 'C195', 'C197']}
+    c100_idx = None
+    total = len(df_txt)
 
-    def descarregar_bloco_formatado(saida_final, buffer, tipo_op):
-        saida_final.extend(buffer['C100'])
-        for i, c170 in enumerate(buffer['C170']):
-            saida_final.append(c170)
-            if tipo_op == '0' and i < len(buffer['C180']):
-                saida_final.append(buffer['C180'][i])
-            elif tipo_op == '1' and i < len(buffer['C185']):
-                saida_final.append(buffer['C185'][i])
-        saida_final.extend(buffer['C190'])
-        saida_final.extend(buffer['C195'])
-        saida_final.extend(buffer['C197'])
+    progress.progress(0.1, text="🔧 Reestruturando Bloco C...")
 
-    total_linhas = len(df)
-
-    for idx, row in df.iterrows():
-        nota = int(row['Nota'])
+    for idx, row in df_txt.iterrows():
         reg = row['Registro']
         conteudo = row['Conteudo']
 
         if reg == 'C100':
             if buffer['C100']:
-                tipo_op = mapa_operacao.get(nota_atual, '0')
-                descarregar_bloco_formatado(saida_final, buffer, tipo_op)
+                tipo_op = tipo_op_map.get(c100_idx, '0')
+                saida_final.extend(buffer['C100'])
+
+                if tipo_op == '1':  # SAÍDA
+                    saida_final.extend(buffer['C185'])
+                    saida_final.extend(buffer['C190'])
+                else:  # ENTRADA
+                    for j, c170 in enumerate(buffer['C170']):
+                        saida_final.append(c170)
+                        if j < len(buffer['C180']):
+                            saida_final.append(buffer['C180'][j])
+                    saida_final.extend(buffer['C190'])
+
+                saida_final.extend(buffer['C195'])
+                saida_final.extend(buffer['C197'])
                 buffer = {k: [] for k in buffer}
-            nota_atual = nota
+            c100_idx = idx
             buffer['C100'].append(conteudo)
 
         elif reg in buffer:
             buffer[reg].append(conteudo)
 
-        if idx % 500 == 0:
-            progress.progress(min((idx + 1) / total_linhas, 1.0), text=f"⏳ Processando linha {idx + 1} de {total_linhas}")
+        elif reg == 'C990':
+            if buffer['C100']:
+                tipo_op = tipo_op_map.get(c100_idx, '0')
+                saida_final.extend(buffer['C100'])
 
-    if buffer['C100']:
-        tipo_op = mapa_operacao.get(nota_atual, '0')
-        descarregar_bloco_formatado(saida_final, buffer, tipo_op)
+                if tipo_op == '1':
+                    saida_final.extend(buffer['C185'])
+                    saida_final.extend(buffer['C190'])
+                else:
+                    for j, c170 in enumerate(buffer['C170']):
+                        saida_final.append(c170)
+                        if j < len(buffer['C180']):
+                            saida_final.append(buffer['C180'][j])
+                    saida_final.extend(buffer['C190'])
+
+                saida_final.extend(buffer['C195'])
+                saida_final.extend(buffer['C197'])
+                buffer = {k: [] for k in buffer}
+            saida_final.append(conteudo)
+
+        elif isinstance(reg, str) and reg.startswith("C"):
+            saida_final.append(conteudo)
+        else:
+            saida_final.append(conteudo)
+
+        if idx % 500 == 0:
+            progress.progress((idx + 1) / total, text=f"⏳ Processando linha {idx + 1} de {total}")
 
     progress.progress(1.0, text="✅ Reestruturação concluída!")
 
-    if formato_saida == "CSV":
-        csv_str = pd.DataFrame({'Conteudo': saida_final}).to_csv(index=False, header=False)
-        csv_bytes = io.BytesIO(csv_str.encode("utf-8"))
-        st.download_button(
-            label="📥 Baixar arquivo reestruturado (.csv)",
-            data=csv_bytes,
-            file_name="BLOCO_C_REESTRUTURADO.csv",
-            mime="text/csv"
-        )
-
-    elif formato_saida == "TXT":
-        txt_str = "\n".join(saida_final)
-        txt_bytes = io.BytesIO(txt_str.encode("utf-8"))
-        st.download_button(
-            label="📥 Baixar arquivo reestruturado (.txt)",
-            data=txt_bytes,
-            file_name="BLOCO_C_REESTRUTURADO.txt",
-            mime="text/plain"
-        )
+    # Geração do arquivo final
+    txt_output = io.BytesIO("".join(saida_final).encode("ISO-8859-1"))
+    st.download_button(
+        label="📥 Baixar arquivo reestruturado (.txt)",
+        data=txt_output,
+        file_name="BLOCO_C_REESTRUTURADO.txt",
+        mime="text/plain"
+    )
