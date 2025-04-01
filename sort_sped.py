@@ -8,11 +8,43 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Estilo Dark
+# 🌒 Dark theme estilizado (moderno)
 st.markdown("""
     <style>
-    body { background-color: #111111; color: white; }
-    .stApp { background-color: #1e1e1e; }
+    html, body, [class*="css"]  {
+        background-color: #1e1e1e;
+        color: #f5f5f5;
+    }
+    .stButton>button {
+        background-color: #0a84ff;
+        color: white;
+        font-weight: bold;
+        border: none;
+        border-radius: 6px;
+        padding: 0.5em 1em;
+    }
+    .stDownloadButton>button {
+        background-color: #0a84ff;
+        color: white;
+        font-weight: bold;
+        border: none;
+        border-radius: 6px;
+        padding: 0.5em 1em;
+    }
+    .stTextInput>div>div>input {
+        background-color: #2b2b2b;
+        color: white;
+    }
+    .stRadio>div>div>label {
+        color: #ccc;
+    }
+    .stFileUploader>div>div {
+        background-color: #2b2b2b;
+        color: white;
+    }
+    .stMarkdown h1, h2, h3 {
+        color: white;
+    }
     </style>
 """, unsafe_allow_html=True)
 
