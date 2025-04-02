@@ -2,8 +2,11 @@ import streamlit as st
 from decimal import Decimal, ROUND_HALF_UP
 from tempfile import NamedTemporaryFile
 
-st.set_page_config(page_title="Reestruturador Bloco C - EFD", layout="centered")
-st.title("🗂️ Reestruturador do Bloco C - EFD Contribuições")
+st.set_page_config(
+    page_title="Reestruturador Bloco C - EFD", 
+    page_icon="🗂️",
+    layout="centered")
+st.title("📁 Reestruturador do Bloco C - EFD Contribuições")
 
 # Tema escuro estilizado
 st.markdown("""
