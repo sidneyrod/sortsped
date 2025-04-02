@@ -1,21 +1,18 @@
 import streamlit as st
-import pandas as pd
-import io
+from decimal import Decimal, ROUND_HALF_UP
+from tempfile import NamedTemporaryFile
 
-st.set_page_config(
-    page_title="Reestruturador Bloco C - EFD",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="Reestruturador Bloco C - EFD", layout="centered")
+st.title("📄 Reestruturador do Bloco C - EFD Contribuições")
 
-# 🌒 Dark theme estilizado (moderno)
+# Tema escuro estilizado
 st.markdown("""
     <style>
     html, body, [class*="css"]  {
         background-color: #1e1e1e;
         color: #f5f5f5;
     }
-    .stButton>button {
+    .stButton>button, .stDownloadButton>button {
         background-color: #0a84ff;
         color: white;
         font-weight: bold;
@@ -23,123 +20,111 @@ st.markdown("""
         border-radius: 6px;
         padding: 0.5em 1em;
     }
-    .stDownloadButton>button {
-        background-color: #0a84ff;
-        color: white;
-        font-weight: bold;
-        border: none;
-        border-radius: 6px;
-        padding: 0.5em 1em;
-    }
-    .stTextInput>div>div>input {
+    .stTextInput>div>div>input, .stFileUploader>div>div {
         background-color: #2b2b2b;
         color: white;
     }
-    .stRadio>div>div>label {
-        color: #ccc;
-    }
-    .stFileUploader>div>div {
-        background-color: #2b2b2b;
-        color: white;
-    }
-    .stMarkdown h1, h2, h3 {
+    .stRadio>div>div>label, .stMarkdown h1, h2, h3 {
         color: white;
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🛠️ Reestruturador do Bloco C - EFD Contribuições")
-st.markdown("Ajusta a estrutura do Bloco C conforme o leiaute oficial validado no PVA.")
+def decimal_br(valor):
+    return Decimal(valor.replace(",", ".")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-uploaded_file = st.file_uploader("📤 Envie o arquivo .txt da EFD:", type=["txt"])
+def processar_efd_contribuicoes(conteudo):
+    linhas = conteudo.splitlines()
+    novas_linhas = []
+    i = 0
+    total = len(linhas)
+    progress = st.progress(0.0)
+
+    while i < total:
+        linha = linhas[i]
+
+        if linha.startswith("|C100|"):
+            grupo_c100 = [linha]
+            i += 1
+
+            grupo_c170 = []
+            grupo_c180 = []
+            registros_auxiliares = []
+            outros = []
+
+            # Coletar registros até o próximo C100
+            while i < total and not linhas[i].startswith("|C100|"):
+                atual = linhas[i]
+                if atual.startswith("|C170|"):
+                    grupo_c170.append(atual)
+                elif atual.startswith("|C180|"):
+                    grupo_c180.append(atual)
+                elif atual.startswith(("|C190|", "|C195|", "|C197|")):
+                    registros_auxiliares.append(atual)
+                else:
+                    outros.append(atual)
+                i += 1
+
+            # Relacionar corretamente C180 com C170
+            estrutura = []
+            usados_c180 = set()
+            for c170 in grupo_c170:
+                estrutura.append(c170)
+                campos_c170 = c170.split("|")
+                try:
+                    valor_c170 = decimal_br(campos_c170[7])
+                except:
+                    continue
+
+                for idx, c180 in enumerate(grupo_c180):
+                    if idx in usados_c180:
+                        continue
+                    campos_c180 = c180.split("|")
+                    try:
+                        qtd = decimal_br(campos_c180[3])
+                        v_unit = decimal_br(campos_c180[5])
+                        valor_total = qtd * v_unit
+                        if abs(valor_total - valor_c170) <= Decimal("0.01"):
+                            estrutura.append(c180)
+                            usados_c180.add(idx)
+                            break
+                    except:
+                        continue
+
+            # C180s restantes sem correspondência
+            c180_sobras = [grupo_c180[idx] for idx in range(len(grupo_c180)) if idx not in usados_c180]
+
+            # Montar bloco completo na ordem correta
+            grupo_c100.extend(estrutura)
+            grupo_c100.extend(c180_sobras)
+            grupo_c100.extend(outros)
+            grupo_c100.extend(registros_auxiliares)
+            novas_linhas.extend(grupo_c100)
+
+        else:
+            novas_linhas.append(linha)
+            i += 1
+
+        progress.progress(min(i / total, 1.0))
+
+    return "\n".join(novas_linhas)
+
+# Upload do arquivo .txt
+uploaded_file = st.file_uploader("📤 Envie o arquivo .txt da EFD Contribuições", type=["txt"])
 
 if uploaded_file:
-    progress = st.progress(0, text="🔄 Carregando arquivo...")
+    conteudo = uploaded_file.read().decode("latin1")
 
-    content = uploaded_file.read().decode("ISO-8859-1")
-    linhas = content.splitlines(keepends=True)
+    if st.button("🚀 Processar Arquivo"):
+        resultado = processar_efd_contribuicoes(conteudo)
 
-    df_txt = pd.DataFrame(linhas, columns=["Conteudo"])
-    df_txt['Registro'] = df_txt['Conteudo'].str.extract(r'\|(C\d{3})\|')
+        st.success("✅ Processamento concluído!")
 
-    # Mapeia o tipo da operação para cada C100
-    tipo_op_map = {}
-    for i, row in df_txt.iterrows():
-        if row['Registro'] == 'C100':
-            campos = row['Conteudo'].split('|')
-            if len(campos) > 2:
-                tipo_op_map[i] = campos[2]
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="latin1") as f:
+            f.write(resultado)
+            output_path = f.name
 
-    saida_final = []
-    buffer = {k: [] for k in ['C100', 'C170', 'C180', 'C185', 'C190', 'C195', 'C197']}
-    c100_idx = None
-    total = len(df_txt)
-
-    progress.progress(0.1, text="🔧 Reestruturando Bloco C...")
-
-    for idx, row in df_txt.iterrows():
-        reg = row['Registro']
-        conteudo = row['Conteudo']
-
-        if reg == 'C100':
-            if buffer['C100']:
-                tipo_op = tipo_op_map.get(c100_idx, '0')
-                saida_final.extend(buffer['C100'])
-
-                if tipo_op == '1':  # SAÍDA
-                    saida_final.extend(buffer['C185'])
-                    saida_final.extend(buffer['C190'])
-                else:  # ENTRADA
-                    for j, c170 in enumerate(buffer['C170']):
-                        saida_final.append(c170)
-                        if j < len(buffer['C180']):
-                            saida_final.append(buffer['C180'][j])
-                    saida_final.extend(buffer['C190'])
-
-                saida_final.extend(buffer['C195'])
-                saida_final.extend(buffer['C197'])
-                buffer = {k: [] for k in buffer}
-            c100_idx = idx
-            buffer['C100'].append(conteudo)
-
-        elif reg in buffer:
-            buffer[reg].append(conteudo)
-
-        elif reg == 'C990':
-            if buffer['C100']:
-                tipo_op = tipo_op_map.get(c100_idx, '0')
-                saida_final.extend(buffer['C100'])
-
-                if tipo_op == '1':
-                    saida_final.extend(buffer['C185'])
-                    saida_final.extend(buffer['C190'])
-                else:
-                    for j, c170 in enumerate(buffer['C170']):
-                        saida_final.append(c170)
-                        if j < len(buffer['C180']):
-                            saida_final.append(buffer['C180'][j])
-                    saida_final.extend(buffer['C190'])
-
-                saida_final.extend(buffer['C195'])
-                saida_final.extend(buffer['C197'])
-                buffer = {k: [] for k in buffer}
-            saida_final.append(conteudo)
-
-        elif isinstance(reg, str) and reg.startswith("C"):
-            saida_final.append(conteudo)
-        else:
-            saida_final.append(conteudo)
-
-        if idx % 500 == 0:
-            progress.progress((idx + 1) / total, text=f"⏳ Processando linha {idx + 1} de {total}")
-
-    progress.progress(1.0, text="✅ Reestruturação concluída!")
-
-    # Geração do arquivo final
-    txt_output = io.BytesIO("".join(saida_final).encode("ISO-8859-1"))
-    st.download_button(
-        label="📥 Baixar arquivo reestruturado (.txt)",
-        data=txt_output,
-        file_name="BLOCO_C_REESTRUTURADO.txt",
-        mime="text/plain"
-    )
+        with open(output_path, "rb") as f:
+            st.download_button("📥 Baixar Arquivo Reestruturado", f, file_name="efd_reestruturado.txt")
+else:
+    st.info("Por favor, envie um arquivo `.txt` codificado em latin1.")
