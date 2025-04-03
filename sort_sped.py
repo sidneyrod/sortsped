@@ -1,5 +1,5 @@
 import streamlit as st
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from tempfile import NamedTemporaryFile
 
 st.set_page_config(
@@ -8,7 +8,6 @@ st.set_page_config(
     layout="centered")
 st.title("📁 Reestruturador do Bloco C - EFD Contribuições")
 
-# Tema escuro estilizado
 st.markdown("""
     <style>
     html, body, [class*="css"]  {
@@ -34,11 +33,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def decimal_br(valor):
-    return Decimal(valor.replace(",", ".")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return Decimal(valor.replace(",", "."))
 
 def processar_efd_contribuicoes(conteudo):
     linhas = conteudo.splitlines()
     novas_linhas = []
+    orfaos_detectados = []
     i = 0
     total = len(linhas)
     progress = st.progress(0.0)
@@ -55,7 +55,6 @@ def processar_efd_contribuicoes(conteudo):
             registros_auxiliares = []
             outros = []
 
-            # Coletar registros até o próximo C100
             while i < total and not linhas[i].startswith("|C100|"):
                 atual = linhas[i]
                 if atual.startswith("|C170|"):
@@ -68,14 +67,13 @@ def processar_efd_contribuicoes(conteudo):
                     outros.append(atual)
                 i += 1
 
-            # Relacionar corretamente C180 com C170
             estrutura = []
             usados_c180 = set()
             for c170 in grupo_c170:
                 estrutura.append(c170)
                 campos_c170 = c170.split("|")
                 try:
-                    valor_c170 = decimal_br(campos_c170[7])
+                    valor_c170 = decimal_br(campos_c170[7]).quantize(Decimal("0.000001"))
                 except:
                     continue
 
@@ -86,7 +84,7 @@ def processar_efd_contribuicoes(conteudo):
                     try:
                         qtd = decimal_br(campos_c180[3])
                         v_unit = decimal_br(campos_c180[5])
-                        valor_total = qtd * v_unit
+                        valor_total = (qtd * v_unit).quantize(Decimal("0.000001"))
                         if abs(valor_total - valor_c170) <= Decimal("0.01"):
                             estrutura.append(c180)
                             usados_c180.add(idx)
@@ -94,13 +92,12 @@ def processar_efd_contribuicoes(conteudo):
                     except:
                         continue
 
-            # C180s restantes sem correspondência
             c180_sobras = [grupo_c180[idx] for idx in range(len(grupo_c180)) if idx not in usados_c180]
+            orfaos_detectados.extend(c180_sobras)
 
-            # Montar bloco completo na ordem correta
             grupo_c100.extend(estrutura)
-            grupo_c100.extend(c180_sobras)
             grupo_c100.extend(outros)
+            grupo_c100.extend(c180_sobras)
             grupo_c100.extend(registros_auxiliares)
             novas_linhas.extend(grupo_c100)
 
@@ -110,18 +107,17 @@ def processar_efd_contribuicoes(conteudo):
 
         progress.progress(min(i / total, 1.0))
 
-    return "\n".join(novas_linhas)
+    return "\n".join(novas_linhas), orfaos_detectados
 
-# Upload do arquivo .txt
-uploaded_file = st.file_uploader(""
-"📤 Envie o bloco C da EFD Contribuições para os registros C180 e C185 serem reestruturados.", 
-type=["txt"])
+uploaded_file = st.file_uploader(
+    "📤 Envie o bloco C da EFD Contribuições para os registros C180 e C185 serem reestruturados.", 
+    type=["txt"])
 
 if uploaded_file:
     conteudo = uploaded_file.read().decode("latin1")
 
     if st.button("🚀 Processar Arquivo"):
-        resultado = processar_efd_contribuicoes(conteudo)
+        resultado, orfaos = processar_efd_contribuicoes(conteudo)
 
         st.success("✅ Processamento concluído!")
 
@@ -130,7 +126,15 @@ if uploaded_file:
             output_path = f.name
 
         with open(output_path, "rb") as f:
-            st.download_button("📥 Baixar Arquivo Reestruturado", f, file_name="arquivo_reestruturado.txt")
-else:
-    st.markdown("ℹ️ O Bloco C será reestruturado automaticamente ao realizar o upload do arquivo `.txt` para processamento. ")
+            st.download_button("📥 Baixar Arquivo Reestruturado", f, file_name="arquivo_efd_reestruturado.txt")
 
+        if orfaos:
+            st.warning(f"⚠️ {len(orfaos)} registro(s) C180 não foram vinculados a nenhum C170.")
+            with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="latin1") as f_orf:
+                f_orf.write("\n".join(orfaos))
+                orf_path = f_orf.name
+
+            with open(orf_path, "rb") as f_orf:
+                st.download_button("📄 Baixar relatório de C180 órfãos", f_orf, file_name="relatorio_c180_orfaos.txt")
+else:
+    st.markdown("ℹ️ O Bloco C será reestruturado automaticamente ao realizar o upload do arquivo `.txt` para processamento.")
