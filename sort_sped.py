@@ -113,7 +113,9 @@ def processar_efd_contribuicoes(conteudo):
     return "\n".join(novas_linhas)
 
 # Upload do arquivo .txt
-uploaded_file = st.file_uploader("📤 Envie o arquivo da EFD Contribuições", type=["txt"])
+uploaded_file = st.file_uploader(""
+"📤 Envie o bloco C da EFD Contribuições para os registros C180 e C185 serem reestruturados.", 
+type=["txt"])
 
 if uploaded_file:
     conteudo = uploaded_file.read().decode("latin1")
@@ -128,7 +130,7 @@ if uploaded_file:
             output_path = f.name
 
         with open(output_path, "rb") as f:
-            st.download_button("📥 Baixar Arquivo Reestruturado", f, file_name="efd_reestruturado.txt")
+            st.download_button("📥 Baixar Arquivo Reestruturado", f, file_name="arquivo_reestruturado.txt")
 else:
-    st.markdown("ℹ️ Envie o arquivo `.txt` gerado para processamento e reestruturar o Bloco C automaticamente.")
+    st.markdown("ℹ️ O Bloco C será reestruturado automaticamente ao realizar o upload do arquivo `.txt` para processamento. ")
 
